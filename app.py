@@ -431,9 +431,13 @@ def gen_sh(
   --network_args "train_blocks=single" {line_break}
   --lr_scheduler constant_with_warmup {line_break}
   --max_grad_norm 0.0 {line_break}"""
-    else:
         # 20G+ VRAM
+    elif vram=="20G" or vram=="24G":
         optimizer = f"--optimizer_type adamw8bit {line_break}"
+        workers = 4
+    else:
+        optimizer = f"--optimizer_type PagedAdamW8bit {line_break}"
+        workers = 8
 
 
     #######################################################
@@ -446,6 +450,7 @@ def gen_sh(
         model_folder = f"models/unet/{repo}"
     model_path = os.path.join(model_folder, model_file)
     pretrained_model_path = resolve_path(model_path)
+
 
     clip_path = resolve_path("models/clip/clip_l.safetensors")
     t5_path = resolve_path("models/clip/t5xxl_fp16.safetensors")
@@ -515,8 +520,17 @@ def gen_toml(
   dataset_folder,
   resolution,
   class_tokens,
-  num_repeats
+  num_repeats,
+  vram
 ):
+    if vram == "40G":
+        batch_size=16
+    elif vram =="20G" or vram=="24G":
+        batch_size =8
+    elif vram =="16G":
+        batch_size = 4
+    else:
+        batch_size =1
     toml = f"""[general]
 shuffle_caption = false
 caption_extension = '.txt'
@@ -524,7 +538,7 @@ keep_tokens = 1
 
 [[datasets]]
 resolution = {resolution}
-batch_size = 1
+batch_size = {batch_size}
 keep_tokens = 1
 
   [[datasets.subsets]]
@@ -681,7 +695,8 @@ def update(
         dataset_folder,
         resolution,
         class_tokens,
-        num_repeats
+        num_repeats,
+        vram
     )
     return gr.update(value=sh), gr.update(value=toml), dataset_folder
 
@@ -922,13 +937,13 @@ with gr.Blocks(elem_id="app", theme=theme, css=css, fill_width=True) as demo:
                     model_names = list(models.keys())
                     print(f"model_names={model_names}")
                     base_model = gr.Dropdown(label="Base model (edit the models.yaml file to add more to this list)", choices=model_names, value=model_names[0])
-                    vram = gr.Radio(["20G", "16G", "12G" ], value="20G", label="VRAM", interactive=True)
+                    vram = gr.Radio(["40G", "24G", "20G", "16G", "12G" ], value="20G", label="VRAM", interactive=True)
                     num_repeats = gr.Number(value=10, precision=0, label="Repeat trains per image", interactive=True)
                     max_train_epochs = gr.Number(label="Max Train Epochs", value=16, interactive=True)
                     total_steps = gr.Number(0, interactive=False, label="Expected training steps")
                     sample_prompts = gr.Textbox("", lines=5, label="Sample Image Prompts (Separate with new lines)", interactive=True)
                     sample_every_n_steps = gr.Number(0, precision=0, label="Sample Image Every N Steps", interactive=True)
-                    resolution = gr.Number(value=512, precision=0, label="Resize dataset images")
+                    resolution = gr.Radio([512, 768, 1024], value=512, label="Resize dataset images", interactive=True)
                 with gr.Column():
                     gr.Markdown(
                         """# Step 2. Dataset
@@ -1002,6 +1017,7 @@ with gr.Blocks(elem_id="app", theme=theme, css=css, fill_width=True) as demo:
                 terminal = LogsView(label="Train log", elem_id="terminal")
             with gr.Row():
                 gallery = gr.Gallery(get_samples, inputs=[lora_name], label="Samples", every=10, columns=6)
+
 
         with gr.TabItem("Publish") as publish_tab:
             hf_token = gr.Textbox(label="Huggingface Token")
